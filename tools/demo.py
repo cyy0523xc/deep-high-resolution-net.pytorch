@@ -52,7 +52,7 @@ def parse_args():
                         default=None,
                         nargs=argparse.REMAINDER)
     parser.add_argument('--inImage',
-                        help='data directory',
+                        help='input image path',
                         type=str,
                         default='')
 
