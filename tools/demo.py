@@ -1,42 +1,30 @@
-# ------------------------------------------------------------------------------
-# pose.pytorch
-# Copyright (c) 2018-present Microsoft
-# Licensed under The Apache-2.0 License [see LICENSE for details]
-# Written by Bin Xiao (Bin.Xiao@microsoft.com)
-# ------------------------------------------------------------------------------
-
+# -*- coding: utf-8 -*-
+#
+# 参考：https://github.com/leoxiaobin/deep-high-resolution-net.pytorch/issues/9
+# Author: alex
+# Created Time: 2019年08月30日 星期五 14时26分01秒
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
 import argparse
-# import os
-# import pprint
-import logging
-import time
-import numpy as np
-from PIL import Image
-
+import os
+import pprint
 import torch
 import torch.nn.parallel
-# import torch.backends.cudnn as cudnn
+import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
-# import torchvision.transforms as transforms
-
-# import pyximport
-# pyximport.install()
-
+import torchvision.transforms as transforms
 import _init_paths
 from config import cfg
 from config import update_config
-# from core.loss import JointsMSELoss
-# from core.function import validate
-# from utils.utils import create_logger
-
-# import dataset
-# import models
+from core.loss import JointsMSELoss
+from core.function import get_final_preds
+from utils.utils import create_logger
+from utils.transforms import *
+import cv2
+import numpy as np
 
 
 def parse_args():
@@ -44,18 +32,19 @@ def parse_args():
     # general
     parser.add_argument('--cfg',
                         help='experiment configure file name',
-                        required=True,
+                        default='experiments/mpii/hrnet/w32_256x256_adam_lr1e-3.yaml',
                         type=str)
 
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
                         default=None,
                         nargs=argparse.REMAINDER)
-    parser.add_argument('--inImage',
-                        help='input image path',
+
+    parser.add_argument('--img-file',
+                        help='input your test img',
                         type=str,
                         default='')
-
+    # philly
     parser.add_argument('--modelDir',
                         help='model directory',
                         type=str,
@@ -72,130 +61,127 @@ def parse_args():
                         help='prev Model directory',
                         type=str,
                         default='')
-
     args = parser.parse_args()
     return args
+
+
+def _box2cs(box, image_width, image_height):
+    x, y, w, h = box[:4]
+    return _xywh2cs(x, y, w, h, image_width, image_height)
+
+
+def _xywh2cs(x, y, w, h, image_width, image_height):
+    center = np.zeros((2), dtype=np.float32)
+    center[0] = x + w * 0.5
+    center[1] = y + h * 0.5
+
+    aspect_ratio = image_width * 1.0 / image_height
+    pixel_std = 200
+
+    if w > aspect_ratio * h:
+        h = w * 1.0 / aspect_ratio
+    elif w < aspect_ratio * h:
+        w = h * aspect_ratio
+    scale = np.array(
+        [w * 1.0 / pixel_std, h * 1.0 / pixel_std],
+        dtype=np.float32)
+    if center[0] != -1:
+        scale = scale * 1.25
+
+    return center, scale
 
 
 def main():
     args = parse_args()
     update_config(cfg, args)
 
-    logger = logging.getLogger()
-    # logger, final_output_dir, tb_log_dir = create_logger(
-    #     cfg, args.cfg, 'valid')
-    #
-    # logger.info(pprint.pformat(args))
-    # logger.info(cfg)
+    logger, final_output_dir, tb_log_dir = create_logger(
+        cfg, args.cfg, 'valid')
+
+    logger.info(pprint.pformat(args))
+    logger.info(cfg)
 
     # cudnn related setting
-    # cudnn.benchmark = cfg.CUDNN.BENCHMARK
+    cudnn.benchmark = cfg.CUDNN.BENCHMARK
     torch.backends.cudnn.deterministic = cfg.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
 
-    # model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(cfg, is_train=False)
-    # model = eval('models.pose_hrnet.get_pose_net')(cfg, is_train=False)
+    # model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(
+    #     cfg, is_train=False
+    # )
     from models.pose_hrnet import get_pose_net
     model = get_pose_net(cfg, is_train=False)
 
-    logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
-    model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE, map_location='cpu'), strict=False)
+    if cfg.TEST.MODEL_FILE:
+        logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
+        model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE), strict=False)
+    else:
+        model_state_file = os.path.join(
+            final_output_dir, 'final_state.pth'
+        )
+        logger.info('=> loading model from {}'.format(model_state_file))
+        model.load_state_dict(torch.load(model_state_file))
 
-    model = torch.nn.DataParallel(model, device_ids=cfg.GPUS)
+    model = torch.nn.DataParallel(model, device_ids=cfg.GPUS).cuda()
 
-    # # define loss function (criterion) and optimizer
+    # define loss function (criterion) and optimizer
     # criterion = JointsMSELoss(
     #     use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT
     # ).cuda()
 
-    # Data loading code
-    # normalize = transforms.Normalize(
-    #      mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-    # )
+    # Loading an image
+    image_file = args.img_file
+    data_numpy = cv2.imread(image_file,
+                            cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+    if data_numpy is None:
+        logger.error('=> fail to read {}'.format(image_file))
+        raise ValueError('=> fail to read {}'.format(image_file))
 
-    # data_transforms = transforms.Compose([transforms.ToTensor(), normalize])
+    # object detection box
+    box = [450, 160, 350, 560]
+    c, s = _box2cs(box, data_numpy.shape[0], data_numpy.shape[1])
+    r = 0
 
-    # valid_dataset = eval('dataset.'+cfg.DATASET.DATASET)(
-    #     cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
-    #     transforms.Compose([
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ])
-    # )
-    # valid_loader = torch.utils.data.DataLoader(
-    #     valid_dataset,
-    #     batch_size=cfg.TEST.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
-    #     shuffle=False,
-    #     num_workers=cfg.WORKERS,
-    #     pin_memory=True
-    # )
+    trans = get_affine_transform(c, s, r, cfg.MODEL.IMAGE_SIZE)
+    input = cv2.warpAffine(
+        data_numpy,
+        trans,
+        (int(cfg.MODEL.IMAGE_SIZE[0]), int(cfg.MODEL.IMAGE_SIZE[1])),
+        flags=cv2.INTER_LINEAR)
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
+    ])
 
-    # # evaluate on validation set
-    # validate(cfg, valid_loader, valid_dataset, model, criterion,
-    #          final_output_dir, tb_log_dir)
-
-    count_warm_up = 10
-    count_actual = 50
-    batch_size = 3
-
-    # in_img = torch.zeros((batch_size, 3, 192, 256), dtype=torch.float32)
-    # in_img = Image.open('test_data/4_yoga.jpg')
-    in_img = Image.open(args.inImage)
-
-    # Normalization
-    wd, ht = 256, 192
-    in_img = in_img.resize((wd, ht))
-    in_img = np.moveaxis(np.array(in_img), -1, 0)  # Convert to channels-first
-    in_img = (in_img.astype(np.float32)/255 - np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)) / np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
-    in_img = in_img[np.newaxis, :]  # Add new axis for batch
-    in_img = np.concatenate([in_img] * batch_size)  # Create a batch
-
-    print('Batch shape: {:}'.format(in_img.shape))
-    in_img = torch.Tensor(in_img)
-
+    input = transform(input).unsqueeze(0)
     # switch to evaluate mode
     model.eval()
-
-    # ----------------------------------
-    start_time = time.time()
     with torch.no_grad():
-        for i in range(count_warm_up):
-            outputs = model(in_img)
-        print('Time at warm up: {:.0f}ms'.format(1000 * (time.time() - start_time)/(count_warm_up * batch_size)))
+        # compute output heatmap
+        output = model(input)
+        preds, maxvals = get_final_preds(cfg, output.clone().cpu().numpy(),
+                                         np.asarray([c]), np.asarray([s]))
 
-    # ----------------------------------
-    start_time = time.time()
-    with torch.no_grad():
-        for i in range(count_actual):
-            outputs = model(in_img)
-            print(outputs)
+        image = data_numpy.copy()
+        for mat in preds[0]:
+            x, y = int(mat[0]), int(mat[1])
+            cv2.circle(image, (x, y), 2, (255, 0, 0), 2)
 
-            # if isinstance(outputs, list):
-            #     output = outputs[-1]
-            # else:
-            #     output = outputs
-
-            # preds, maxvals = get_final_preds(config, output.clone().cpu().numpy(), c, s)
-            #
-            # all_preds = np.zeros((config.MODEL.NUM_JOINTS, 3), dtype=np.float32)
-            # all_boxes = np.zeros(6)
-            # all_preds[ :, 0:2] = preds[:, :, 0:2]
-            # all_preds[ :, 2:3] = maxvals
-            # # double check this all_boxes parts
-            # all_boxes[0:2] = c[:, 0:2]
-            # all_boxes[2:4] = s[:, 0:2]
-            # all_boxes[4] = np.prod(s*200, 1)
-            # all_boxes[5] = score
-
-        print('Time: {:.0f}ms'.format(1000 * (time.time() - start_time) / (count_actual * batch_size)))
+        # vis result
+        filename = image_file.split('/')[-1]
+        filename = os.path.join('demo_output', filename)
+        cv2.imwrite(filename, image)
+        # cv2.imshow('res', image)
+        # cv2.waitKey(10000)
 
 
 if __name__ == '__main__':
     """
-    python3 tools/demo.py  --inImage images/test_yoga01.jpg \
-        --cfg experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml \
-            TEST.MODEL_FILE models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth \
-            TEST.USE_GT_BBOX False \
-            GPUS "0,1"
+    python3 tools/demo.py \
+        --cfg experiments/coco/hrnet/w32_384x288_adam_lr1e-3.yaml \
+        --img-file 000002.jpg \
+        TEST.MODEL_FILE models/pytorch/pose_coco/pose_hrnet_w32_384x288.pth \
+        GPUS "0,1"
     """
     main()
