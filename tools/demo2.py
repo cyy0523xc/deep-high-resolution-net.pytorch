@@ -106,9 +106,11 @@ def main():
     torch.backends.cudnn.deterministic = cfg.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
 
-    model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(
-        cfg, is_train=False
-    )
+    # model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(
+    #     cfg, is_train=False
+    # )
+    from models.pose_hrnet import get_pose_net
+    model = get_pose_net(cfg, is_train=False)
 
     if cfg.TEST.MODEL_FILE:
         logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
