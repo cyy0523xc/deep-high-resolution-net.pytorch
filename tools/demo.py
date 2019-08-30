@@ -94,7 +94,9 @@ def main():
     torch.backends.cudnn.enabled = cfg.CUDNN.ENABLED
 
     # model = eval('models.'+cfg.MODEL.NAME+'.get_pose_net')(cfg, is_train=False)
-    model = eval('models.pose_hrnet.get_pose_net')(cfg, is_train=False)
+    # model = eval('models.pose_hrnet.get_pose_net')(cfg, is_train=False)
+    from models.pose_hrnet import get_pose_net
+    model = get_pose_net(cfg, is_train=False)
 
     logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
     model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE, map_location='cpu'), strict=False)
