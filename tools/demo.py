@@ -180,7 +180,12 @@ if __name__ == '__main__':
     """
     python3 tools/demo.py \
         --cfg experiments/coco/hrnet/w32_384x288_adam_lr1e-3.yaml \
-        --img-file 000002.jpg \
+        --img-file images/danren01.jpeg \
+        TEST.MODEL_FILE models/pytorch/pose_coco/pose_hrnet_w32_384x288.pth \
+        GPUS "0,1"
+    python3 tools/demo.py \
+        --cfg experiments/coco/hrnet/w32_384x288_adam_lr1e-3.yaml \
+        --img-file images/danren01.jpeg \
         TEST.MODEL_FILE models/pytorch/pose_coco/pose_hrnet_w32_384x288.pth \
         GPUS "0,1"
     """
