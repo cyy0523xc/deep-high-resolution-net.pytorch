@@ -191,4 +191,11 @@ def main():
 
 
 if __name__ == '__main__':
+    """
+    python3 tools/demo.py  --inImage images/test_yoga01.jpg \
+        --cfg experiments/coco/hrnet/w48_384x288_adam_lr1e-3.yaml \
+            TEST.MODEL_FILE models/pytorch/pose_coco/pose_hrnet_w48_384x288.pth \
+            TEST.USE_GT_BBOX False \
+            GPUS "0,1"
+    """
     main()
